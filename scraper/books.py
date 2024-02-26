@@ -1,19 +1,37 @@
 """
 Source: https://github.com/maria-antoniak/goodreads-scraper/blob/master/get_books.py
 """
+
 import re
 from urllib.request import urlopen
 from bs4 import BeautifulSoup
 from argparse import Namespace
-
 from scraper import author
+
+
+def get_num_ratings(soup):
+
+    num_ratings = soup.find("span", {"data-testid": "ratingsCount"}).text
+    num_ratings = re.search(r"(.*)\s", num_ratings)[0].strip().replace(",", "")
+
+    return int(num_ratings)
+
+
+def get_num_reviews(soup):
+
+    num_reviews = soup.find("span", {"data-testid": "reviewsCount"}).text
+    num_reviews = re.search(r"(.*)\s", num_reviews)[0].strip().replace(",", "")
+
+    return int(num_reviews)
 
 
 def get_genres(soup):
     genres = []
-    for node in soup.find_all("div", {"class": "left"}):
+    for node in soup.find_all(
+        "span", {"class": "BookPageMetadataSection__genreButton"}
+    ):
         current_genres = node.find_all(
-            "a", {"class": "actionLinkLite bookPageGenreLink"}
+            "a", {"class": "Button Button--tag-inline Button--small"}
         )
         current_genre = " > ".join([g.text for g in current_genres])
         if current_genre.strip():
@@ -40,16 +58,17 @@ def get_series_uri(soup):
 
 
 def get_rating_distribution(soup):
-    distribution = re.findall(r"renderRatingGraph\([\s]*\[[0-9,\s]+", str(soup))[0]
-    distribution = " ".join(distribution.split())
-    distribution = [int(c.strip()) for c in distribution.split("[")[1].split(",")]
-    distribution_dict = {
-        5: distribution[0],
-        4: distribution[1],
-        3: distribution[2],
-        2: distribution[3],
-        1: distribution[4],
-    }
+
+    all_rating = soup.find_all("div", {"data-testid": re.compile(r"labelTotal")})
+    distribution_dict = {}
+    for rating in all_rating:
+
+        rate = int(re.search(r"\d", rating.attrs.get("data-testid")).group())
+
+        num_rating = int(re.search(r"(.*)\s", rating.text)[0].strip().replace(",", ""))
+
+        distribution_dict[rate] = num_rating
+
     return distribution_dict
 
 
@@ -70,12 +89,12 @@ def get_year_first_published(soup):
 
 
 def get_author_id(soup):
-    author_url = soup.find("a", {"class": "authorName"}).attrs.get("href")
+    author_url = soup.find("a", {"class": "Avatar Avatar--large"}).attrs.get("href")
     return author_url.split("/")[-1]
 
 
 def get_description(soup):
-    return soup.find("div", {"id": "description"}).findAll("span")[-1].text
+    return soup.find("div", {"data-testid": "description"}).findAll("span")[-1].text
 
 
 def get_id(book_id):
@@ -85,29 +104,29 @@ def get_id(book_id):
 
 def scrape_book(book_id: str, args: Namespace):
     url = "https://www.goodreads.com/book/show/" + book_id
-    source = urlopen(url)
+    source = urlopen(url, timeout=60000)
     soup = BeautifulSoup(source, "html.parser")
+
+    # print(book_id)
 
     book = {
         "book_id_title": book_id,
         "book_id": get_id(book_id),
-        "book_title": " ".join(soup.find("h1", {"id": "bookTitle"}).text.split()),
+        "book_title": " ".join(
+            soup.find("h1", {"data-testid": "bookTitle"}).text.split()
+        ),
         "book_description": get_description(soup),
         "book_url": url,
-        "book_image": soup.find("img", {"id": "coverImage"}).attrs.get("src"),
-        "book_series": get_series_name(soup),
-        "book_series_uri": get_series_uri(soup),
+        "book_image": soup.find("img", {"class": "ResponsiveImage"}).attrs.get("src"),
+        # "book_series": get_series_name(soup),
+        # "book_series_uri": get_series_uri(soup),
         "year_first_published": get_year_first_published(soup),
         "num_pages": get_num_pages(soup),
         "genres": get_genres(soup),
-        "num_ratings": int(
-            soup.find("meta", {"itemprop": "ratingCount"})["content"].strip()
-        ),
-        "num_reviews": int(
-            soup.find("meta", {"itemprop": "reviewCount"})["content"].strip()
-        ),
+        "num_ratings": get_num_ratings(soup),
+        "num_reviews": get_num_reviews(soup),
         "average_rating": float(
-            soup.find("span", {"itemprop": "ratingValue"}).text.strip()
+            soup.find("div", {"class": "RatingStatistics__rating"}).text
         ),
         "rating_distribution": get_rating_distribution(soup),
     }
